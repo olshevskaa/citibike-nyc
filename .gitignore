@@ -1,8 +1,13 @@
 # Airflow
 airflow/airflow.db
-airflow/*.pid
 airflow/logs/
+airflow/*.pid
 airflow/.env
+airflow/unittests.cfg
+airflow/webserver_config.py
+airflow/__pycache__/
+
+**/.env
 
 # Python
 __pycache__/
