@@ -1,0 +1,38 @@
+# Airflow
+airflow/airflow.db
+airflow/*.pid
+airflow/logs/
+airflow/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.env
+.venv/
+venv/
+pip-wheel-metadata/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Data
+data/*
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# VSCode / PyCharm / JetBrains
+.vscode/
+.idea/
+
+# OS/Filesystem
+.DS_Store
+Thumbs.db
+
+# Git
+*.swp
