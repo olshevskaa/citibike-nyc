@@ -6,6 +6,7 @@ airflow/.env
 airflow/unittests.cfg
 airflow/webserver_config.py
 airflow/__pycache__/
+airflow/creds
 
 **/.env
 

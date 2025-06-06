@@ -1,1 +1,7 @@
 requests
+apache-airflow[gcp]==2.9.0
+google-cloud-storage
+google-cloud-bigquery
+pandas
+pyarrow
+python-dotenv
