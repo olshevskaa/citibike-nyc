@@ -77,15 +77,8 @@ def download_csv(execution_date_str):
     return False
 
 
-
-def unzip_and_convert_to_parquet(execution_date_str):
-    os.makedirs(BASE_DIR, exist_ok=True)
-    unzip_dir = f'{BASE_DIR}/csv'
-
-    file_id = get_file_id(execution_date_str)
-    paths = get_file_paths(execution_date_str)
-
-    with zipfile.ZipFile(paths["zip"], 'r') as zip_ref:
+def extract_csv_files(zip_file_path, unzip_dir, file_id):
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
         zip_ref.extractall(unzip_dir)
     files = os.listdir(unzip_dir)
     print('Files:', files)
@@ -98,7 +91,9 @@ def unzip_and_convert_to_parquet(execution_date_str):
 
     if not csv_files:
         raise FileNotFoundError("No CSV file found after extraction.")
+    return csv_files
 
+def load_csv_files(csv_files, unzip_dir):
     if len(csv_files) == 1:
         csv_path = os.path.join(unzip_dir, csv_files[0])
         df = pd.read_csv(csv_path)
@@ -109,17 +104,13 @@ def unzip_and_convert_to_parquet(execution_date_str):
             df_tmp = pd.read_csv(csv_path)
             df_list.append(df_tmp)
         df = pd.concat(df_list, ignore_index=True)
+    return df
 
-    # Fix mixed-type columns, e.g., 'start_station_id' and 'end_station_id'
+def preprocess_df(df):
+# Fix mixed-type columns, e.g., 'start_station_id' and 'end_station_id'
     for col in ['start_station_id', 'end_station_id']:
         if col in df.columns:
             df[col] = df[col].astype(str).fillna('')
-
-    timestamp_cols = ['started_at', 'ended_at']
-    for col in timestamp_cols:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-            break
 
     expected_columns = [
         'ride_id',
@@ -138,15 +129,27 @@ def unzip_and_convert_to_parquet(execution_date_str):
     ]
 
     df = df[[col for col in expected_columns if col in df.columns]]
+    return df
 
-    table = pa.Table.from_pandas(df)
-    pq.write_table(table, paths["parquet"], preserve_index=False)
-    print(f"Parquet saved at: {paths["parquet"]}")
+def convert_to_parquet(df, parquet_path):
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    pq.write_table(table, parquet_path)
+    print(f"Parquet saved at: {parquet_path}")
 
-    # Clean up unzip_dir to free space
+def cleanup_zip_dir(unzip_dir):
     shutil.rmtree(unzip_dir)
     print(f"Cleaned up extracted files from {unzip_dir}")
 
+def unzip_and_convert_to_parquet(execution_date_str):
+    file_id = get_file_id(execution_date_str)
+    paths = get_file_paths(execution_date_str)
+    unzip_dir = f'{BASE_DIR}/csv'
+
+    csv_files = extract_csv_files(paths["zip"], unzip_dir, file_id)
+    df = load_csv_files(csv_files, unzip_dir)
+    df = preprocess_df(df)
+    convert_to_parquet(df, paths["parquet"])
+    cleanup_zip_dir(unzip_dir)
 
 def upload_to_gcs(execution_date_str):
     file_id = get_file_id(execution_date_str)
@@ -187,7 +190,7 @@ with DAG(
     schedule_interval="0 0 1/7 * *",
     start_date=datetime(2024, 1, 1),
     max_active_runs=1,
-    catchup=True,
+    catchup=False,
 ) as dag:
     
     check_if_needed = ShortCircuitOperator(
