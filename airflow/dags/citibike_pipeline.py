@@ -121,6 +121,24 @@ def unzip_and_convert_to_parquet(execution_date_str):
             df[col] = pd.to_datetime(df[col], errors='coerce')
             break
 
+    expected_columns = [
+        'ride_id',
+        'rideable_type',
+        'started_at',
+        'ended_at',
+        'start_station_name',
+        'start_station_id',
+        'end_station_name',
+        'end_station_id',
+        'start_lat',
+        'start_lng',
+        'end_lat',
+        'end_lng',
+        'member_casual'
+    ]
+
+    df = df[[col for col in expected_columns if col in df.columns]]
+
     table = pa.Table.from_pandas(df)
     pq.write_table(table, paths["parquet"], preserve_index=False)
     print(f"Parquet saved at: {paths["parquet"]}")
