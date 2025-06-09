@@ -122,7 +122,7 @@ def unzip_and_convert_to_parquet(execution_date_str):
             break
 
     table = pa.Table.from_pandas(df)
-    pq.write_table(table, paths["parquet"])
+    pq.write_table(table, paths["parquet"], preserve_index=False)
     print(f"Parquet saved at: {paths["parquet"]}")
 
     # Clean up unzip_dir to free space
