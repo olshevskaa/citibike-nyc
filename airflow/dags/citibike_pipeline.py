@@ -115,6 +115,12 @@ def unzip_and_convert_to_parquet(execution_date_str):
         if col in df.columns:
             df[col] = df[col].astype(str).fillna('')
 
+    timestamp_cols = ['started_at', 'ended_at']
+    for col in timestamp_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            break
+
     table = pa.Table.from_pandas(df)
     pq.write_table(table, paths["parquet"])
     print(f"Parquet saved at: {paths["parquet"]}")
