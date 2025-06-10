@@ -94,17 +94,25 @@ def extract_csv_files(zip_file_path, unzip_dir, file_id):
     return csv_files
 
 def load_csv_files(csv_files, unzip_dir):
+    def read_csv_with_fallback(csv_path):
+        try:
+            return pd.read_csv(csv_path, encoding='utf-8')
+        except UnicodeDecodeError:
+            print(f"UTF-8 decode failed for {csv_path}, trying ISO-8859-1...")
+            return pd.read_csv(csv_path, encoding='ISO-8859-1')  # or 'latin1'
+
     if len(csv_files) == 1:
         csv_path = os.path.join(unzip_dir, csv_files[0])
-        df = pd.read_csv(csv_path)
+        df = read_csv_with_fallback(csv_path)
     else:
         df_list = []
         for csv_file in csv_files:
             csv_path = os.path.join(unzip_dir, csv_file)
-            df_tmp = pd.read_csv(csv_path)
+            df_tmp = read_csv_with_fallback(csv_path)
             df_list.append(df_tmp)
         df = pd.concat(df_list, ignore_index=True)
     return df
+
 
 def preprocess_df(df):
 # Fix mixed-type columns, e.g., 'start_station_id' and 'end_station_id'
