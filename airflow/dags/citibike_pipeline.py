@@ -137,12 +137,42 @@ def preprocess_df(df):
     ]
 
     df = df[[col for col in expected_columns if col in df.columns]]
+
+    for date_col in ['started_at', 'ended_at']:
+        if date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col], utc=True)
+            # Convert to microsecond precision (BigQuery compatible)
+            df[date_col] = df[date_col].dt.floor('us')
+
     return df
 
 def convert_to_parquet(df, parquet_path):
     table = pa.Table.from_pandas(df, preserve_index=False)
-    pq.write_table(table, parquet_path)
+    
+    new_fields = []
+    for field in table.schema:
+        if field.name in ['started_at', 'ended_at']:
+            new_fields.append(pa.field(field.name, pa.timestamp('us', tz='UTC')))
+        else:
+            new_fields.append(field)
+    
+    new_schema = pa.schema(new_fields)
+    
+    table = table.cast(new_schema)
+
+    pq.write_table(
+        table, 
+        parquet_path,
+        use_deprecated_int96_timestamps=False,
+        coerce_timestamps='us',
+        allow_truncated_timestamps=True
+    )
     print(f"Parquet saved at: {parquet_path}")
+    print(f"Schema: {table.schema}")  # Debug info
+
+def cleanup_zip_dir(unzip_dir):
+    shutil.rmtree(unzip_dir)
+    print(f"Cleaned up extracted files from {unzip_dir}")
 
 def cleanup_zip_dir(unzip_dir):
     shutil.rmtree(unzip_dir)
@@ -177,20 +207,78 @@ def upload_to_gcs(execution_date_str):
         os.remove(paths['zip'])
         print(f"Deleted local zip file {paths['zip']}")
 
+def create_partitioned_table_if_not_exists():
+    credentials = service_account.Credentials.from_service_account_file(GOOGLE_APPLICATION_CREDENTIALS)
+    client = bigquery.Client(credentials=credentials)
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+    
+    schema = [
+        bigquery.SchemaField("ride_id", "STRING"),
+        bigquery.SchemaField("rideable_type", "STRING"),
+        bigquery.SchemaField("started_at", "TIMESTAMP"),
+        bigquery.SchemaField("ended_at", "TIMESTAMP"),
+        bigquery.SchemaField("start_station_name", "STRING"),
+        bigquery.SchemaField("start_station_id", "STRING"),
+        bigquery.SchemaField("end_station_name", "STRING"),
+        bigquery.SchemaField("end_station_id", "STRING"),
+        bigquery.SchemaField("start_lat", "FLOAT"),
+        bigquery.SchemaField("start_lng", "FLOAT"),
+        bigquery.SchemaField("end_lat", "FLOAT"),
+        bigquery.SchemaField("end_lng", "FLOAT"),
+        bigquery.SchemaField("member_casual", "STRING"),
+    ]
+    
+    table = bigquery.Table(table_id, schema=schema)
+    
+    # Configure partitioning by started_at (monthly partitions)
+    table.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.MONTH,
+        field="started_at"
+    )
+    
+    table.clustering_fields = ["member_casual", "rideable_type"]
+    
+    try:
+        table = client.create_table(table, exists_ok=True)
+        print(f"Created partitioned table {table_id}")
+    except Exception as e:
+        print(f"Table creation failed or already exists: {e}")
+
+
 def load_into_bigquery(execution_date_str):
     file_id = get_file_id(execution_date_str)
     credentials = service_account.Credentials.from_service_account_file(GOOGLE_APPLICATION_CREDENTIALS)
     client = bigquery.Client(credentials=credentials)
-    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{file_id}-{BQ_TABLE}"
+    table_id = f"{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
+    
+    execution_date = datetime.strptime(execution_date_str, "%Y-%m-%d")
+    year = execution_date.year
+    month = execution_date.month
+    
+    # Delete existing data for this month (if any) to avoid duplicates
+    delete_query = f"""
+    DELETE FROM `{table_id}`
+    WHERE DATE_TRUNC(started_at, MONTH) = DATE('{year}-{month:02d}-01')
+    """
+    
+    try:
+        delete_job = client.query(delete_query)
+        delete_job.result()
+        print(f"Deleted existing data for {year}-{month:02d}")
+    except Exception as e:
+        print(f"Delete operation failed (table might not exist): {e}")
     
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.PARQUET,
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
     )
 
     uri = f"gs://{GCS_BUCKET_NAME}/citibike/{file_id}.parquet"
     load_job = client.load_table_from_uri(uri, table_id, job_config=job_config)
     load_job.result()
+    
+    print(f"Loaded data for {file_id} into partitioned table {table_id}")
 
 with DAG(
     dag_id="citibike_etl_dag",
@@ -198,7 +286,7 @@ with DAG(
     schedule_interval="0 0 1/7 * *",
     start_date=datetime(2024, 1, 1),
     max_active_runs=1,
-    catchup=False,
+    catchup=True,
 ) as dag:
     
     check_if_needed = ShortCircuitOperator(
@@ -227,10 +315,15 @@ with DAG(
         op_kwargs={"execution_date_str": "{{ ds }}"},
     )
 
+    create_table_task = PythonOperator(
+        task_id="create_partitioned_table",
+        python_callable=create_partitioned_table_if_not_exists,
+    )
+
     load_bq_task = PythonOperator(
         task_id="load_into_bigquery",
         python_callable=load_into_bigquery,
         op_kwargs={"execution_date_str": "{{ ds }}"}
     )
 
-    check_if_needed >> check_file_available >> convert_task >> upload_task >> load_bq_task
+    check_if_needed >> check_file_available >> convert_task >> upload_task >> create_table_task >> load_bq_task
