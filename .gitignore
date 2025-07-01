@@ -10,6 +10,8 @@ airflow/creds
 
 **/.env
 
+**/weather_nyc.csv
+
 # Python
 __pycache__/
 *.pyc
