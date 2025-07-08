@@ -1,7 +1,7 @@
-# Citibike NYC
+# Citi Bike NYC
 
 ## Project Overview
-This is an end-to-end project for Citi Bike ride time analysis and prediction, starting with an Apache Airflow pipeline to collect the data, followed by full analysis, hypothesis testing, and predictive modeling using Random Forest.
+This is an end-to-end project for Citi Bike bycicle sharing system ride time analysis and prediction, starting with an Apache Airflow pipeline to collect the data, followed by full analysis, hypothesis testing, and predictive modeling using Random Forest.
 
 ## Repository Structure
 ```
